@@ -258,6 +258,11 @@ Gating, in `application.yml`:
 - **Signup-style setup intent (no customerKey) with a bank account:** the bank payment method is attached to the new
   customer afterwards in `createVaultWithNonce`. Confirm in Stripe test mode that this works for your account
   (Financial Connections-verified accounts); otherwise create the customer up front, as the PI flow does.
+- **Saved payment method sync:** when a bank account replaces a card for an *existing* customer (Add / replace
+  payment method), FullPayments only learns about it from the async `payment_method.attached` webhook. The facade now
+  uses the `{type}` of `/api/braintree/processPayment/{type}/…`: if jBilling asks for `ach` but FullPayments still has
+  the card on record (or the other way round), it re-syncs from Stripe (newest payment method of that type), detaches
+  the old one, and never charges the wrong type.
 - No real Braintree ACH path: brands with `ach-provider: BRAINTREE` get an error for `paymentType=ach`.
 
 ---

@@ -60,7 +60,8 @@ public class BraintreeFacadeController {
             @PathVariable String businessId,
             @PathVariable String amount,
             @PathVariable String productKey) {
-        return helper.processPayment(customerKey, amount, productKey);
+        // ACH: the type (cc / ach) now decides which saved payment method is charged
+        return helper.processPayment(type, customerKey, amount, productKey);
     }
 
     @PostMapping("/createTransactionWithCustomerKey/{businessId}/{customerKey}/{amount}/{isAuthorization}/{productKey}")
@@ -70,7 +71,7 @@ public class BraintreeFacadeController {
             @PathVariable String amount,
             @PathVariable Boolean isAuthorization,
             @PathVariable String productKey) {
-        return helper.processPayment(customerKey, amount, productKey);
+        return helper.processPayment(null, customerKey, amount, productKey);
     }
 
     @RequestMapping(

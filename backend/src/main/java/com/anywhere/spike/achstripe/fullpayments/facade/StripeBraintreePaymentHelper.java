@@ -108,9 +108,9 @@ public class StripeBraintreePaymentHelper {
     }
 
     /** /processPayment/{type}/{customerKey}/{businessId}/{amount}/{productKey} – charge the saved payment method. */
-    public Map<String, Object> processPayment(String customerKey, String amount, String productKey) {
+    public Map<String, Object> processPayment(String type, String customerKey, String amount, String productKey) {
         return getStripeCustomerWithVaultedCard(customerKey)
-                .map(customer -> processPayment(amount, productKey, customer))
+                .map(customer -> processPayment(type, amount, productKey, customer))
                 .orElseGet(() -> braintreeNotAvailable(
                         "processPayment (no Stripe platform customer with a saved payment method for customerKey "
                                 + customerKey + ")"));
@@ -187,9 +187,11 @@ public class StripeBraintreePaymentHelper {
                 .filter(c -> c.getPaymentMethodIds() != null && !c.getPaymentMethodIds().isEmpty());
     }
 
-    private Map<String, Object> processPayment(String amount, String productKey, StripePlatformCustomer customer) {
+    private Map<String, Object> processPayment(
+            String type, String amount, String productKey, StripePlatformCustomer customer) {
         try {
-            TransactionJDO jdo = processPaymentCommandHandler.processPayment(customer, amount, productKey);
+            TransactionJDO jdo = processPaymentCommandHandler.processPayment(
+                    customer, amount, productKey, ProcessPaymentCommandHandler.stripeTypeFor(type));
             Map<String, Object> result = new HashMap<>();
             result.put(TRANSACTION_JDO, mapTransactionJdo(jdo));
             result.put(STATUS, true);

@@ -56,7 +56,30 @@ public class ProcessPaymentCommandHandler {
         this.customerRepository = customerRepository;
     }
 
+    static final String TYPE_CARD = "card";
+    static final String TYPE_US_BANK_ACCOUNT = "us_bank_account";
+
+    /**
+     * ACH: maps the jBilling payment type from the facade URL (/processPayment/{type}/...) to the Stripe payment
+     * method type that must be charged. null = any (createTransactionWithCustomerKey, unknown types).
+     */
+    public static String stripeTypeFor(String jBillingType) {
+        if (jBillingType == null) {
+            return null;
+        }
+        return switch (jBillingType.toLowerCase(Locale.US)) {
+            case "ach" -> TYPE_US_BANK_ACCOUNT;
+            case "cc" -> TYPE_CARD;
+            default -> null;
+        };
+    }
+
     public TransactionJDO processPayment(StripePlatformCustomer customer, String amount, String productKey) {
+        return processPayment(customer, amount, productKey, null);
+    }
+
+    public TransactionJDO processPayment(
+            StripePlatformCustomer customer, String amount, String productKey, String requiredType) {
         log.info("Processing payment for Stripe customer: {} for amount: {}", customer.getExternalId(), amount);
         Optional<PlatformIntentCache.PendingCapturePaymentIntentMetadata> pendingCapture =
                 cache.getPendingCapture(customer.getExternalId());
@@ -67,17 +90,24 @@ public class ProcessPaymentCommandHandler {
             paymentIntent = captureHandler.capturePaymentIntent(pendingCapture.get().paymentIntentId(), amount, options);
             cache.evictPendingCapture(customer.getExternalId());
         } else {
-            paymentIntent = createNewPaymentWithVaultedPaymentMethod(customer, amount, productKey);
+            paymentIntent = createNewPaymentWithVaultedPaymentMethod(customer, amount, productKey, requiredType);
         }
         log.info("Processed payment with id {} status {}", paymentIntent.getId(), paymentIntent.getStatus());
         return saveTransactionJDO(customer, amount, productKey, paymentIntent);
     }
 
     private PaymentIntent createNewPaymentWithVaultedPaymentMethod(
-            StripePlatformCustomer customer, String amount, String productKey) {
+            StripePlatformCustomer customer, String amount, String productKey, String requiredType) {
         RequestOptions options = requestOptionsProvider.getRequestOptions(customer.getBusinessId());
         String paymentMethodId = getPaymentMethodId(customer, options);
         PaymentMethod paymentMethod = stripeGateway.retrievePaymentMethod(paymentMethodId, options);
+        if (requiredType != null && !requiredType.equals(paymentMethod.getType())) {
+            // ACH: jBilling's instrument (e.g. a bank account saved via a SetupIntent for an EXISTING customer) and
+            // the PM FullPayments has on record (only swapped by the async payment_method.attached webhook) can be
+            // out of sync. Never charge a card when jBilling asked for ACH (or vice versa): re-sync from Stripe.
+            paymentMethod = resyncPaymentMethod(customer, requiredType, paymentMethod, options);
+            paymentMethodId = paymentMethod.getId();
+        }
 
         PaymentIntentCreateParams.Builder builder = PaymentIntentCreateParams.builder()
                 .setCurrency(SUBSCRIPTION_CURRENCY.toLowerCase(Locale.US))
@@ -100,6 +130,41 @@ public class ProcessPaymentCommandHandler {
         }
         PaymentIntent created = stripeGateway.createPaymentIntent(builder.build(), options);
         return stripeGateway.retrieveWithExpandedPaymentMethod(created.getId(), options);
+    }
+
+    /**
+     * Picks the newest payment method of the required type attached to the Stripe customer and makes it the platform
+     * customer's single payment method (same one-PM rule as the payment_method.attached handler).
+     */
+    private PaymentMethod resyncPaymentMethod(
+            StripePlatformCustomer customer, String requiredType, PaymentMethod current, RequestOptions options) {
+        Customer stripeCustomer = stripeGateway
+                .retrieveCustomer(customer.getStripeCustomerId(), options)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Can't find stripe customer with id: " + customer.getStripeCustomerId()));
+        PaymentMethod match = stripeGateway.listCustomerPaymentMethods(stripeCustomer, options).stream()
+                .filter(pm -> requiredType.equals(pm.getType()))
+                .max(java.util.Comparator.comparing(PaymentMethod::getCreated))
+                .orElseThrow(() -> new IllegalStateException("jBilling requested a " + requiredType
+                        + " payment but Stripe customer " + stripeCustomer.getId() + " has no " + requiredType
+                        + " payment method (it has " + current.getType() + " " + current.getId() + ")"));
+        log.warn("Platform customer {} had {} {} on record but jBilling requested {} – switching to {}",
+                customer.getExternalId(), current.getType(), current.getId(), requiredType, match.getId());
+        for (String oldId : List.copyOf(customer.getPaymentMethodIds())) {
+            if (!oldId.equals(match.getId())) {
+                try {
+                    stripeGateway.detachPaymentMethod(oldId, options);
+                } catch (Exception e) {
+                    log.warn("Failed to detach payment method {}: {}", oldId, e.getMessage());
+                }
+                customer.removePaymentMethodId(oldId);
+            }
+        }
+        if (!customer.getPaymentMethodIds().contains(match.getId())) {
+            customer.addPaymentMethodId(match.getId());
+        }
+        customerRepository.save(customer);
+        return match;
     }
 
     private String getPaymentMethodId(StripePlatformCustomer customer, RequestOptions options) {
