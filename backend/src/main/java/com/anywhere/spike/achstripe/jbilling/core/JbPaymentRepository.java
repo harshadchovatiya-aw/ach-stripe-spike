@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface JbPaymentRepository extends JpaRepository<JbPayment, Integer> {
     List<JbPayment> findByUserIdOrderByIdDesc(Integer userId);
+
+    Optional<JbPayment> findFirstByTransactionIdAndRefundFalse(String transactionId);
 }

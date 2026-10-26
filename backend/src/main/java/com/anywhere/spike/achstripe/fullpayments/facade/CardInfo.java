@@ -6,7 +6,7 @@ import java.util.Optional;
 /**
  * Copy of fullpayments com.acti.braintree.Helper.CardInfo – what the facade returns to jBilling ("cardInfo").
  * Note the fallback: for anything that is not a card it returns a fake 1111 / visa / 12/2036.
- * ACH (P6): return a bankInfo (bank name, last4, account type) for us_bank_account instead.
+ * ACH (P6): for us_bank_account the facade now returns a {@link BankInfo} instead (cardInfo is left out).
  */
 public record CardInfo(String last4, String expirationDate, String type, String cardHolderName) {
 

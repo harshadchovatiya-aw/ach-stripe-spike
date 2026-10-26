@@ -12,9 +12,10 @@ import org.springframework.stereotype.Component;
  * the Braintree facade:
  * <ul>
  *   <li>single-use token (nonce)  → /api/braintree/createTransaction/{btBusinessId}/{amount}/{nonce}/{productKey}</li>
- *   <li>saved instrument ("BT ID") → /api/braintree/processPayment/cc/{customerKey}/{btBusinessId}/{amount}/{productKey}</li>
+ *   <li>saved instrument ("BT ID") → /api/braintree/processPayment/{type}/{customerKey}/{btBusinessId}/{amount}/{productKey}</li>
  * </ul>
- * ACH: bind the new stripe-achId type to this same plugin – FullPayments charges whatever PM the customer has.
+ * ACH: the new stripe-achId type is bound to this same plugin – FullPayments charges whatever payment method the
+ * Stripe customer has, so no new jBilling integration is needed.
  */
 @Component
 public class FullPaymentsGatewayPlugin {
@@ -29,8 +30,22 @@ public class FullPaymentsGatewayPlugin {
         this.properties = properties;
     }
 
-    /** PaymentAuthorizationDTOEx in jBilling. */
-    public record PaymentAuthorization(boolean result, String transactionId, String responseMessage, Map<String, Object> raw) {}
+    /**
+     * PaymentAuthorizationDTOEx in jBilling. responseCode / paymentMethodType come from the facade's TransactionJDO
+     * (ACH: PENDING = submitted to the bank, not settled yet).
+     */
+    public record PaymentAuthorization(
+            boolean result,
+            String transactionId,
+            String responseMessage,
+            String responseCode,
+            String paymentMethodType,
+            Map<String, Object> raw) {
+
+        public boolean isPendingSettlement() {
+            return "PENDING".equals(responseCode);
+        }
+    }
 
     public PaymentAuthorization charge(JbUser user, JbPaymentInstrument instrument, BigDecimal amount) {
         String btBusinessId = properties.brand(user.getBrandId()).btBusinessId();
@@ -43,7 +58,8 @@ public class FullPaymentsGatewayPlugin {
                     btBusinessId, amountString, instrument.getSingleUseToken(), productKey);
         } else {
             String customerKey = instrument.getMetaFields().get(META_BT_ID);
-            response = fullPaymentsClient.processPayment("cc", customerKey, btBusinessId, amountString, productKey);
+            String type = JbPaymentInstrument.TEMPLATE_ACH.equals(instrument.getMethodTemplate()) ? "ach" : "cc";
+            response = fullPaymentsClient.processPayment(type, customerKey, btBusinessId, amountString, productKey);
         }
         return toAuthorization(response);
     }
@@ -57,11 +73,17 @@ public class FullPaymentsGatewayPlugin {
     private static PaymentAuthorization toAuthorization(Map<String, Object> response) {
         boolean ok = Boolean.TRUE.equals(response.get("status"));
         String transactionId = null;
+        String responseCode = null;
+        String paymentMethodType = null;
         Object jdo = response.get("transactionJdo");
         if (jdo instanceof Map<?, ?> map) {
-            transactionId = (String) ((Map<String, Object>) map).get("transactionId");
+            Map<String, Object> tx = (Map<String, Object>) map;
+            transactionId = (String) tx.get("transactionId");
+            responseCode = tx.get("responseCode") != null ? String.valueOf(tx.get("responseCode"))
+                    : tx.get("responseStatus") != null ? String.valueOf(tx.get("responseStatus")) : null;
+            paymentMethodType = (String) tx.get("paymentMethodType");
         }
         String message = ok ? "Approved" : String.valueOf(response.get("message"));
-        return new PaymentAuthorization(ok, transactionId, message, response);
+        return new PaymentAuthorization(ok, transactionId, message, responseCode, paymentMethodType, response);
     }
 }

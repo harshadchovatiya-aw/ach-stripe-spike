@@ -14,7 +14,8 @@ import java.time.Instant;
  *   <li>responseCode COMPLETED – a captured / charged payment</li>
  *   <li>referenceTransaction    – set on refund records (responseStatus "Settled")</li>
  * </ul>
- * ACH (P4/P5/P7): add PENDING (submitted, not settled) and FAILED and update them from webhooks.
+ * ACH (P4/P5/P7): responseCode PENDING (submitted to the bank, not settled yet) → COMPLETED (payment_intent.succeeded)
+ * or FAILED (payment_intent.payment_failed). Refund records use responseStatus pending/Settled/failed.
  */
 @Entity
 @Table(name = "transaction_jdo")
@@ -37,6 +38,34 @@ public class TransactionJDO {
     private String responseStatus;
     private String paymentDate;
     private Instant lastModifiedDate = Instant.now();
+    /** card | us_bank_account | ... (spike addition, useful for ACH) */
+    private String paymentMethodType;
+    private String failureCode;
+    private String failureMessage;
+
+    public String getPaymentMethodType() {
+        return paymentMethodType;
+    }
+
+    public void setPaymentMethodType(String paymentMethodType) {
+        this.paymentMethodType = paymentMethodType;
+    }
+
+    public String getFailureCode() {
+        return failureCode;
+    }
+
+    public void setFailureCode(String failureCode) {
+        this.failureCode = failureCode;
+    }
+
+    public String getFailureMessage() {
+        return failureMessage;
+    }
+
+    public void setFailureMessage(String failureMessage) {
+        this.failureMessage = failureMessage;
+    }
 
     public Long getId() {
         return id;

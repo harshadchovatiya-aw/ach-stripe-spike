@@ -77,10 +77,20 @@ public class SpikeController {
                     .map(a -> notBlank(a.secretKey()) && notBlank(a.publishableKey()))
                     .orElse(false);
             b.put("stripeKeysConfigured", keys);
+            // ACH: brand gating ({brandId}.ach.provider) + FullPayments business gating (spike.ach.enabled-business-ids)
+            b.put("achProvider", brand.achProvider());
+            b.put("achEnabled", brand.isStripeAch() && properties.isAchEnabled(brand.stripeBusinessId()));
             brands.add(b);
         });
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("brands", brands);
+        if (properties.ach() != null) {
+            Map<String, Object> ach = new LinkedHashMap<>();
+            ach.put("verificationMethod", properties.ach().verificationMethod());
+            ach.put("reverseJbillingPaymentOnFailure", properties.ach().reverseJbillingPaymentOnFailure());
+            ach.put("hostedApiBaseUrl", properties.hostedApiBaseUrl());
+            res.put("ach", ach);
+        }
         res.put("webhookSecretConfigured",
                 notBlank(properties.stripe().webhookSecret()) || notBlank(properties.stripe().webhookSecretFile()));
         return res;

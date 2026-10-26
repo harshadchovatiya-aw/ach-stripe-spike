@@ -13,8 +13,10 @@
 <header>
   <div>
     <h1>ACH Stripe spike</h1>
-    <p class="sub">Replica of today's <strong>card</strong> flow on the Stripe <strong>platform</strong> account (AnswerForce US):
-      UI → FullPayments platform intents → jBilling hosted API → jBilling → FullPayments "Braintree facade" → Stripe</p>
+    <p class="sub">Today's <strong>card</strong> flow plus <strong>ACH Direct Debit</strong> (US bank account) on the Stripe
+      <strong>platform</strong> account (AnswerForce US only):
+      UI → FullPayments platform intents → jBilling hosted API → jBilling → FullPayments "Braintree facade" → Stripe,
+      and Stripe webhooks → FullPayments → hosted API <code>/stripe/ach/payment-status</code> → jBilling / DS task</p>
   </div>
   <div id="status-chips"></div>
 </header>
@@ -43,9 +45,9 @@
     <div class="card">
       <h2>Make a payment / update payment method</h2>
       <div class="tabs" id="tabs">
-        <button data-flow="saved" class="tab active">Pay with saved card</button>
-        <button data-flow="new" class="tab">Pay with new card</button>
-        <button data-flow="setup" class="tab">Add / replace card</button>
+        <button data-flow="saved" class="tab active">Pay with saved method</button>
+        <button data-flow="new" class="tab">Pay with new card / bank</button>
+        <button data-flow="setup" class="tab">Add / replace payment method</button>
         <button data-flow="billing" class="tab">Billing run (recurring)</button>
       </div>
 
@@ -53,17 +55,45 @@
 
       <div class="row" id="amount-row">
         <label>Amount (USD) <input id="amount" type="number" step="0.01" min="0.50" value="49.00"></label>
-        <label id="save-row" class="check"><input id="save-card" type="checkbox" checked> Save card for future payments</label>
+        <label id="save-row" class="check"><input id="save-card" type="checkbox" checked> Save for future payments</label>
       </div>
 
       <div id="element-wrap" class="hidden">
         <div id="payment-element"></div>
+        <div class="selected-type">Selected payment method: <strong id="selected-type">card</strong></div>
         <p class="hint">Test cards: 4242 4242 4242 4242 (success) · 4000 0025 0000 3155 (3-D Secure) · 4000 0000 0000 9995 (declined) – any future date, any CVC.</p>
+        <details id="ach-hints" class="ach-hints hidden">
+          <summary>ACH test data (US bank account tab)</summary>
+          <p class="hint"><strong>Instant (Financial Connections):</strong> pick the <em>Test Institution</em> in the bank search and a
+            test account (e.g. "Success"). <strong>Manual entry</strong> (verification method <code>automatic</code>): routing
+            <code>110000000</code> with one of the account numbers below, then verify the microdeposits on Stripe's hosted page
+            with amounts <code>32</code> and <code>45</code> or descriptor code <code>SM11AA</code>.</p>
+          <div class="table-wrap"><table>
+            <tr><th>Account number</th><th>Outcome</th></tr>
+            <tr><td><code>000123456789</code></td><td>Payment succeeds</td></tr>
+            <tr><td><code>000222222227</code></td><td>Fails – insufficient funds (DS task)</td></tr>
+            <tr><td><code>000111111113</code></td><td>Fails – account closed (DS task)</td></tr>
+            <tr><td><code>000111111116</code></td><td>Fails – no account found (DS task)</td></tr>
+            <tr><td><code>000333333335</code></td><td>Fails – debit not authorized (DS task)</td></tr>
+            <tr><td><code>000555555559</code></td><td>Succeeds, then a dispute is created (DS task)</td></tr>
+            <tr><td><code>000000000009</code></td><td>Stays <code>processing</code> (PENDING) indefinitely</td></tr>
+          </table></div>
+          <p class="hint">Test-mode ACH payments settle within seconds, so <code>payment_intent.succeeded</code> /
+            <code>payment_failed</code> arrive almost immediately (live: ~4 business days).</p>
+        </details>
+      </div>
+
+      <div id="verify-wrap" class="hidden">
+        <strong>Bank account needs microdeposit verification.</strong>
+        <p class="hint">Open Stripe's hosted verification page, enter <code>32</code> and <code>45</code> (or <code>SM11AA</code>),
+          then come back and continue.</p>
+        <a id="verify-link" href="#" target="_blank" rel="noopener">Open hosted verification page ↗</a>
       </div>
 
       <div class="row">
         <button id="btn-start" class="primary">Start</button>
         <button id="btn-confirm" class="primary hidden">Confirm with Stripe</button>
+        <button id="btn-continue" class="primary hidden">Continue after verification</button>
         <button id="btn-cancel" class="secondary hidden">Cancel</button>
       </div>
       <ol id="steps" class="steps"></ol>
@@ -74,7 +104,10 @@
     <div class="card">
       <div class="card-head">
         <h2>jBilling payments <span class="hint">payment recorded in "jBilling"</span></h2>
-        <button id="btn-refresh" class="secondary">Refresh</button>
+        <div class="row">
+          <label class="check hint"><input id="auto-refresh" type="checkbox"> Auto-refresh (5s)</label>
+          <button id="btn-refresh" class="secondary">Refresh</button>
+        </div>
       </div>
       <div id="payments"></div>
     </div>
@@ -85,12 +118,12 @@
     </div>
 
     <div class="card">
-      <h2>Stripe webhooks received <span class="hint">/webhook/stripe/platform/v2026-01-28</span></h2>
+      <h2>Stripe webhooks received <span class="hint">/webhook/stripe/platform/v2026-01-28 · ACH: processing / succeeded / payment_failed / dispute / mandate / refund</span></h2>
       <div id="webhooks"></div>
     </div>
 
     <div class="card">
-      <h2>DS notes &amp; tasks</h2>
+      <h2>DS notes &amp; tasks <span class="hint">ACH failures, disputes and inactive mandates create a TASK</span></h2>
       <div id="ds"></div>
     </div>
 

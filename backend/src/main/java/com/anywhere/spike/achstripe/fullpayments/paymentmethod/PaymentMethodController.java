@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * FullPayments GET /api/stripe/v4/platform/payment-methods/{paymentMethodId} (GetPaymentMethodByIdQueryHandler).
  * Used by the jBilling hosted API (PaymentHelper.getPaymentMethodDetails) after the UI confirms a SetupIntent.
+ * ACH (P3): also returns bankAccountDetails for us_bank_account payment methods.
  */
 @RestController
 public class PaymentMethodController {
@@ -34,8 +35,12 @@ public class PaymentMethodController {
     public record CardDetails(
             String brand, List<String> networks, String preferredNetwork, String last4, Integer expMonth, Integer expYear) {}
 
-    /** ACH (P3): add bankAccountDetails (bankName, last4, routingNumber, accountType, verification status). */
-    public record PaymentMethodDetailsResponse(String paymentMethodId, String type, CardDetails cardDetails) {}
+    /** ACH (P3) */
+    public record BankAccountDetails(
+            String bankName, String last4, String routingNumber, String accountType, String accountHolderType) {}
+
+    public record PaymentMethodDetailsResponse(
+            String paymentMethodId, String type, CardDetails cardDetails, BankAccountDetails bankAccountDetails) {}
 
     @GetMapping("/api/stripe/v4/platform/payment-methods/{paymentMethodId}")
     public PaymentMethodDetailsResponse getPaymentMethodById(
@@ -60,6 +65,16 @@ public class PaymentMethodController {
                     card.getExpMonth() != null ? card.getExpMonth().intValue() : null,
                     card.getExpYear() != null ? card.getExpYear().intValue() : null);
         }
-        return new PaymentMethodDetailsResponse(paymentMethod.getId(), paymentMethod.getType(), cardDetails);
+        BankAccountDetails bankAccountDetails = null;
+        if (paymentMethod.getUsBankAccount() != null) {
+            PaymentMethod.UsBankAccount bank = paymentMethod.getUsBankAccount();
+            bankAccountDetails = new BankAccountDetails(
+                    bank.getBankName(),
+                    bank.getLast4(),
+                    bank.getRoutingNumber(),
+                    bank.getAccountType(),
+                    bank.getAccountHolderType());
+        }
+        return new PaymentMethodDetailsResponse(paymentMethod.getId(), paymentMethod.getType(), cardDetails, bankAccountDetails);
     }
 }

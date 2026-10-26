@@ -8,7 +8,11 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-/** Simulated jBilling payment (PaymentWS) – what "the payment is recorded in jBilling" means in this spike. */
+/**
+ * Simulated jBilling payment (PaymentWS) – what "the payment is recorded in jBilling" means in this spike.
+ * ACH: settlementStatus tracks the bank debit after jBilling already recorded the payment as Successful
+ * (accept-on-submit, like Braintree): PENDING → SETTLED, or FAILED (and REVERSED when phase-2 reversal is on).
+ */
 @Entity
 @Table(name = "jb_payment")
 public class JbPayment {
@@ -31,6 +35,24 @@ public class JbPayment {
     private String notes;
     private String gatewayMessage;
     private Instant createdAt = Instant.now();
+    private String settlementStatus;
+    private String paymentMethodType;
+
+    public String getSettlementStatus() {
+        return settlementStatus;
+    }
+
+    public void setSettlementStatus(String settlementStatus) {
+        this.settlementStatus = settlementStatus;
+    }
+
+    public String getPaymentMethodType() {
+        return paymentMethodType;
+    }
+
+    public void setPaymentMethodType(String paymentMethodType) {
+        this.paymentMethodType = paymentMethodType;
+    }
 
     protected JbPayment() {}
 

@@ -34,6 +34,21 @@ public class PaymentHelper {
         if (Boolean.FALSE.equals(response.get("status"))) {
             throw new BadRequestException(String.valueOf(response.get("message")));
         }
+        Object bankObject = response.get("bankAccountDetails");
+        if ("us_bank_account".equals(response.get("type")) && bankObject instanceof Map<?, ?> bankMap) {
+            // ACH (hosted-API change): map bankAccountDetails instead of throwing "CardDetails missing"
+            Map<String, Object> bank = (Map<String, Object>) bankMap;
+            Map<String, String> details = new HashMap<>();
+            details.put("paymentMethodType", "us_bank_account");
+            details.put("paymentMethodId", paymentMethodId);
+            details.put("bankName", String.valueOf(bank.get("bankName")));
+            details.put("accountNumber", "********" + bank.get("last4"));
+            details.put("routingNumber", String.valueOf(bank.get("routingNumber")));
+            details.put("accountType", String.valueOf(bank.get("accountType")));
+            details.put("provider", PROVIDER_STRIPE);
+            details.put("btCustomerId", customerKey);
+            return details;
+        }
         Object cardObject = response.get("cardDetails");
         if (!(cardObject instanceof Map<?, ?>)) {
             throw new BadRequestException("CardDetails missing for paymentMethodId=" + paymentMethodId
@@ -44,6 +59,7 @@ public class PaymentHelper {
         details.put("cardNumber", "************" + card.get("last4"));
         details.put("expDate", card.get("expMonth") + "/" + card.get("expYear"));
         details.put("cardType", String.valueOf(card.get("brand")));
+        details.put("paymentMethodType", "card");
         details.put("provider", PROVIDER_STRIPE);
         details.put("btCustomerId", customerKey);
         return details;
@@ -72,13 +88,26 @@ public class PaymentHelper {
             throw new BadRequestException("RespFull: " + response.get("message"));
         }
         Map<String, String> details = new HashMap<>();
+        Object bankInfoObject = response.get("bankInfo");
         Object cardInfoObject = response.get("cardInfo");
-        if (cardInfoObject instanceof Map<?, ?> map) {
+        if (bankInfoObject instanceof Map<?, ?> bankMap) {
+            // ACH (P6): the facade returns bankInfo for us_bank_account
+            Map<String, Object> bankInfo = (Map<String, Object>) bankMap;
+            details.put("paymentMethodType", "us_bank_account");
+            details.put("bankName", String.valueOf(bankInfo.get("bankName")));
+            details.put("accountNumber", "********" + bankInfo.get("last4"));
+            details.put("routingNumber", String.valueOf(bankInfo.get("routingNumber")));
+            details.put("accountType", String.valueOf(bankInfo.get("accountType")));
+        } else if (cardInfoObject instanceof Map<?, ?> map) {
             Map<String, Object> cardInfo = (Map<String, Object>) map;
             details.put("cardNumber", "************" + cardInfo.get("last4"));
             details.put("expDate", String.valueOf(cardInfo.get("expirationDate")));
             details.put("cardType", String.valueOf(cardInfo.get("type")));
         }
+        if (response.get("paymentMethodId") != null) {
+            details.put("paymentMethodId", String.valueOf(response.get("paymentMethodId")));
+        }
+        details.putIfAbsent("paymentMethodType", "card");
         details.put("btCustomerId", customerKey);
         details.put("provider", String.valueOf(response.getOrDefault("source", "BRAINTREE")));
         return details;

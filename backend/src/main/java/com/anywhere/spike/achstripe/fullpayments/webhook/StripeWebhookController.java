@@ -2,8 +2,13 @@ package com.anywhere.spike.achstripe.fullpayments.webhook;
 
 import com.anywhere.spike.achstripe.common.SpikeProperties;
 import com.stripe.exception.SignatureVerificationException;
+import com.stripe.model.Dispute;
 import com.stripe.model.Event;
+import com.stripe.model.Mandate;
+import com.stripe.model.PaymentIntent;
 import com.stripe.model.PaymentMethod;
+import com.stripe.model.Refund;
+import com.stripe.model.SetupIntent;
 import com.stripe.model.StripeObject;
 import com.stripe.net.Webhook;
 import java.io.IOException;
@@ -25,9 +30,9 @@ import org.springframework.web.bind.annotation.RestController;
  * FullPayments platform webhook (/webhook/stripe/platform/v2026-01-28 → StripeWebhookHandler).
  * For the platform account the real code only acts on payment_method.attached.
  *
- * ACH (P7): add payment_intent.succeeded / payment_intent.payment_failed / charge.dispute.created /
- * mandate.updated / refund.updated / refund.failed / setup_intent.* here, update TransactionJDO and notify the
- * jBilling hosted API (which creates the DS task).
+ * ACH (P7): payment_intent.processing / succeeded / payment_failed, charge.dispute.created, mandate.updated,
+ * refund.updated / refund.failed are handled by {@link AchWebhookEventHandler}, which updates TransactionJDO and
+ * notifies the jBilling hosted API (which creates the DS task). setup_intent.* events are only logged.
  */
 @RestController
 public class StripeWebhookController {
@@ -37,14 +42,17 @@ public class StripeWebhookController {
     private final SpikeProperties properties;
     private final UpdatePlatformCustomerPaymentMethodOnPaymentMethodAttachedHandler paymentMethodAttachedHandler;
     private final WebhookEventLog eventLog;
+    private final AchWebhookEventHandler achHandler;
 
     public StripeWebhookController(
             SpikeProperties properties,
             UpdatePlatformCustomerPaymentMethodOnPaymentMethodAttachedHandler paymentMethodAttachedHandler,
-            WebhookEventLog eventLog) {
+            WebhookEventLog eventLog,
+            AchWebhookEventHandler achHandler) {
         this.properties = properties;
         this.paymentMethodAttachedHandler = paymentMethodAttachedHandler;
         this.eventLog = eventLog;
+        this.achHandler = achHandler;
     }
 
     @PostMapping("/webhook/stripe/platform/v2026-01-28")
@@ -65,17 +73,65 @@ public class StripeWebhookController {
         }
 
         StripeObject object = deserialize(event);
-        String objectId = object instanceof PaymentMethod pm ? pm.getId() : null;
+        String objectId = objectId(object);
         String outcome;
-        switch (event.getType()) {
-            case "payment_method.attached" -> outcome = object instanceof PaymentMethod pm
-                    ? paymentMethodAttachedHandler.handle(pm)
-                    : "Could not deserialize PaymentMethod";
-            default -> outcome = "Not handled by the platform webhook (same as fullpayments today)";
+        try {
+            outcome = dispatch(event, object);
+        } catch (Exception e) {
+            log.error("Webhook handling failed for {} {}", event.getId(), event.getType(), e);
+            outcome = "ERROR: " + e.getMessage();
         }
         log.info("Webhook {} {} {} -> {}", event.getId(), event.getType(), objectId, outcome);
         eventLog.add(new WebhookEventLog.Entry(Instant.now(), event.getId(), event.getType(), objectId, outcome));
         return ResponseEntity.ok(Map.of("received", true));
+    }
+
+    private String dispatch(Event event, StripeObject object) {
+        String id = event.getId();
+        return switch (event.getType()) {
+            case "payment_method.attached" -> object instanceof PaymentMethod pm
+                    ? paymentMethodAttachedHandler.handle(pm)
+                    : "Could not deserialize PaymentMethod";
+            // ---- ACH (P7) ----
+            case "payment_intent.processing" -> object instanceof PaymentIntent pi ? achHandler.onProcessing(pi) : bad();
+            case "payment_intent.succeeded" -> object instanceof PaymentIntent pi ? achHandler.onSucceeded(id, pi) : bad();
+            case "payment_intent.payment_failed" ->
+                object instanceof PaymentIntent pi ? achHandler.onPaymentFailed(id, pi) : bad();
+            case "charge.dispute.created" -> object instanceof Dispute d ? achHandler.onDisputeCreated(id, d) : bad();
+            case "mandate.updated" -> object instanceof Mandate m ? achHandler.onMandateUpdated(id, m) : bad();
+            case "refund.updated", "refund.failed" -> object instanceof Refund r ? achHandler.onRefundUpdated(id, r) : bad();
+            case "setup_intent.succeeded", "setup_intent.requires_action", "setup_intent.setup_failed" ->
+                object instanceof SetupIntent si
+                        ? "SetupIntent " + si.getId() + " " + si.getStatus() + " (logged only – microdeposits are phase 2)"
+                        : bad();
+            default -> "Not handled by the platform webhook";
+        };
+    }
+
+    private static String bad() {
+        return "Could not deserialize the event object";
+    }
+
+    private static String objectId(StripeObject object) {
+        if (object instanceof PaymentMethod o) {
+            return o.getId();
+        }
+        if (object instanceof PaymentIntent o) {
+            return o.getId();
+        }
+        if (object instanceof SetupIntent o) {
+            return o.getId();
+        }
+        if (object instanceof Dispute o) {
+            return o.getId();
+        }
+        if (object instanceof Mandate o) {
+            return o.getId();
+        }
+        if (object instanceof Refund o) {
+            return o.getId();
+        }
+        return null;
     }
 
     @GetMapping("/spike/webhook-events")

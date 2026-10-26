@@ -23,6 +23,10 @@ import org.springframework.stereotype.Component;
  * Copy of fullpayments ProcessPaymentCommandHandler – used by /api/braintree/processPayment and
  * /createTransactionWithCustomerKey (jBilling charging a saved instrument / recurring billing).
  * Either captures a pending signup PI, or creates a new off-session PI with the saved payment method.
+ *
+ * <p>ACH (P5): for a saved us_bank_account PM the off-session PI is created with
+ * payment_method_types=[us_bank_account] (the mandate created when the bank account was saved is used) and comes
+ * back "processing" → TransactionJDO PENDING.
  */
 @Component
 public class ProcessPaymentCommandHandler {
@@ -59,29 +63,43 @@ public class ProcessPaymentCommandHandler {
         PaymentIntent paymentIntent;
         if (pendingCapture.isPresent()) {
             RequestOptions options = requestOptionsProvider.getRequestOptions(pendingCapture.get().businessId());
+            // Cards: captures the parked PI. ACH: the PI is already processing – nothing to capture.
             paymentIntent = captureHandler.capturePaymentIntent(pendingCapture.get().paymentIntentId(), amount, options);
             cache.evictPendingCapture(customer.getExternalId());
         } else {
-            paymentIntent = createNewPaymentWithVaultedPaymentMethod(customer, amount);
+            paymentIntent = createNewPaymentWithVaultedPaymentMethod(customer, amount, productKey);
         }
         log.info("Processed payment with id {} status {}", paymentIntent.getId(), paymentIntent.getStatus());
         return saveTransactionJDO(customer, amount, productKey, paymentIntent);
     }
 
-    private PaymentIntent createNewPaymentWithVaultedPaymentMethod(StripePlatformCustomer customer, String amount) {
+    private PaymentIntent createNewPaymentWithVaultedPaymentMethod(
+            StripePlatformCustomer customer, String amount, String productKey) {
         RequestOptions options = requestOptionsProvider.getRequestOptions(customer.getBusinessId());
         String paymentMethodId = getPaymentMethodId(customer, options);
-        // ACH (P5): for a us_bank_account PM also pass the mandate and payment_method_types=[us_bank_account];
-        // the PI comes back "processing", which must be recorded as PENDING, not COMPLETED.
-        PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
+        PaymentMethod paymentMethod = stripeGateway.retrievePaymentMethod(paymentMethodId, options);
+
+        PaymentIntentCreateParams.Builder builder = PaymentIntentCreateParams.builder()
                 .setCurrency(SUBSCRIPTION_CURRENCY.toLowerCase(Locale.US))
                 .setAmount(Money.toMinorUnits(Money.parse(amount)))
                 .setCustomer(customer.getStripeCustomerId())
                 .setPaymentMethod(paymentMethodId)
                 .setConfirm(true)
                 .setOffSession(true)
-                .build();
-        return stripeGateway.createPaymentIntent(params, options);
+                // ACH (P7/P8): lets the webhook find the jBilling account
+                .putMetadata("jBillingCustomerKey", customer.getExternalId());
+        if (customer.getMerchantId() != null) {
+            builder.putMetadata("accountPin", customer.getMerchantId());
+        }
+        if (productKey != null) {
+            builder.putMetadata("jbillingUserId", productKey);
+        }
+        if (BankInfo.isBankAccount(paymentMethod)) {
+            // ACH (P5): restrict to the bank debit; the mandate created when the account was saved is reused.
+            builder.addPaymentMethodType("us_bank_account");
+        }
+        PaymentIntent created = stripeGateway.createPaymentIntent(builder.build(), options);
+        return stripeGateway.retrieveWithExpandedPaymentMethod(created.getId(), options);
     }
 
     private String getPaymentMethodId(StripePlatformCustomer customer, RequestOptions options) {
@@ -115,7 +133,9 @@ public class ProcessPaymentCommandHandler {
         jdo.setCustomerKey(customer.getExternalId());
         jdo.setPaymentDate(String.valueOf(paymentIntent.getCreated()));
         jdo.setLastModifiedDate(Instant.now());
-        jdo.setResponseCode("COMPLETED");
+        // Real code always writes COMPLETED. ACH (P5): PENDING while the bank debit is processing.
+        jdo.setResponseCode(CapturePaymentIntentCommandHandler.responseCodeFor(paymentIntent));
+        jdo.setPaymentMethodType(CapturePaymentIntentCommandHandler.paymentMethodType(paymentIntent));
         jdo.setCurrency(paymentIntent.getCurrency().toUpperCase(Locale.US));
         return transactionJDORepository.save(jdo);
     }

@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
-/** Copy of fullpayments VaultingHelper + VaultingResult. */
+/** Copy of fullpayments VaultingHelper + VaultingResult (+ bankInfo / paymentMethodType for ACH, P6). */
 @Component
 public class VaultingHelper {
 
@@ -17,7 +17,14 @@ public class VaultingHelper {
         this.transactionJDORepository = transactionJDORepository;
     }
 
-    public record VaultingResult(CardInfo cardInfo, String country, String postalCode, String customerKey) {}
+    public record VaultingResult(
+            CardInfo cardInfo,
+            BankInfo bankInfo,
+            String paymentMethodType,
+            String paymentMethodId,
+            String country,
+            String postalCode,
+            String customerKey) {}
 
     /** Saves a "PROFILE" TransactionJDO, like the Braintree vault record jBilling used to expect. */
     public void saveTransactionJdoForBackwardCompatibility(
@@ -37,8 +44,12 @@ public class VaultingHelper {
             PaymentMethod paymentMethod,
             StripePlatformCustomerService.BillingDetails billingDetails,
             String jBillingCustomerKey) {
+        boolean bank = BankInfo.isBankAccount(paymentMethod);
         return new VaultingResult(
-                CardInfo.extractCardInfo(paymentMethod),
+                bank ? null : CardInfo.extractCardInfo(paymentMethod),
+                BankInfo.extract(paymentMethod).orElse(null),
+                paymentMethod != null ? paymentMethod.getType() : null,
+                paymentMethod != null ? paymentMethod.getId() : null,
                 Optional.ofNullable(billingDetails).map(StripePlatformCustomerService.BillingDetails::country).orElse(null),
                 Optional.ofNullable(billingDetails).map(StripePlatformCustomerService.BillingDetails::postalCode).orElse(null),
                 jBillingCustomerKey);

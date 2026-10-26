@@ -12,6 +12,13 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       # Written by the stripe-cli container below
       STRIPE_WEBHOOK_SECRET_FILE: /shared/whsec
+      # ACH Direct Debit (us_bank_account)
+      # automatic = Financial Connections with manual entry + microdeposits fallback; instant = Financial Connections only
+      ACH_VERIFICATION_METHOD: ${ACH_VERIFICATION_METHOD:-automatic}
+      # false = phase 1 (Braintree parity: DS task only); true = phase 2 (also reverse the jBilling payment)
+      ACH_REVERSE_JBILLING_PAYMENT_ON_FAILURE: ${ACH_REVERSE_JBILLING_PAYMENT_ON_FAILURE:-false}
+      # FullPayments → jBilling hosted API ACH status callback (both live in this backend)
+      HOSTED_API_BASE_URL: ${HOSTED_API_BASE_URL:-http://localhost:8080}
     volumes:
       - stripe-shared:/shared:ro
 
@@ -23,7 +30,8 @@ services:
       - backend
 
   # Forwards Stripe test-mode webhooks to the backend platform webhook endpoint
-  # (needed e.g. for payment_method.attached, and later for the ACH settlement / failure events).
+  # (payment_method.attached, and the ACH events: payment_intent.processing / succeeded / payment_failed,
+  # charge.dispute.created, mandate.updated, refund.updated / refund.failed).
   stripe-cli:
     image: stripe/stripe-cli:latest
     depends_on:

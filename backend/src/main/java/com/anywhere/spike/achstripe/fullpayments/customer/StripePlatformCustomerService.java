@@ -51,7 +51,7 @@ public class StripePlatformCustomerService {
             builder.putMetadata("jBillingCustomerKey", jBillingCustomerKey);
             Customer customer = stripeGateway.createCustomer(builder.build(), requestOptions);
             for (PaymentMethod paymentMethod : paymentMethods) {
-                stripeGateway.attachPaymentMethod(paymentMethod, customer.getId(), requestOptions);
+                attachIfNeeded(paymentMethod, customer.getId(), requestOptions);
             }
             repository.save(StripePlatformCustomer.of(
                     jBillingCustomerKey,
@@ -112,13 +112,25 @@ public class StripePlatformCustomerService {
                 .filter(pm -> !platformCustomer.getPaymentMethodIds().contains(pm.getId()))
                 .toList();
         for (PaymentMethod paymentMethod : newPaymentMethods) {
-            stripeGateway.attachPaymentMethod(paymentMethod, customer.getId(), options);
+            attachIfNeeded(paymentMethod, customer.getId(), options);
             platformCustomer.addPaymentMethodId(paymentMethod.getId());
         }
         if (!newPaymentMethods.isEmpty()) {
             repository.save(platformCustomer);
         }
         return Optional.of(customer);
+    }
+
+    /**
+     * Spike addition: when the PI/SI was created with the customer (always the case for ACH, P2), Stripe has already
+     * attached the payment method on confirmation, so attaching again is skipped.
+     */
+    private void attachIfNeeded(PaymentMethod paymentMethod, String customerId, RequestOptions options) {
+        if (customerId.equals(paymentMethod.getCustomer())) {
+            log.debug("PaymentMethod {} already attached to {}", paymentMethod.getId(), customerId);
+            return;
+        }
+        stripeGateway.attachPaymentMethod(paymentMethod, customerId, options);
     }
 
     private static CustomerCreateParams.Builder builder(BillingDetails billingDetails) {

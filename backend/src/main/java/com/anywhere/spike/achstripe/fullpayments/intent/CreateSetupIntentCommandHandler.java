@@ -28,19 +28,23 @@ public class CreateSetupIntentCommandHandler {
     private final StripePlatformCustomerRepository customerRepository;
     private final RequestOptionsProvider requestOptionsProvider;
     private final PlatformIntentCache cache;
+    private final AchIntentOptions achIntentOptions;
 
     public CreateSetupIntentCommandHandler(
             StripeGateway stripeGateway,
             StripePlatformCustomerRepository customerRepository,
             RequestOptionsProvider requestOptionsProvider,
-            PlatformIntentCache cache) {
+            PlatformIntentCache cache,
+            AchIntentOptions achIntentOptions) {
         this.stripeGateway = stripeGateway;
         this.customerRepository = customerRepository;
         this.requestOptionsProvider = requestOptionsProvider;
         this.cache = cache;
+        this.achIntentOptions = achIntentOptions;
     }
 
-    public record CreateSetupIntentResponse(String id, String clientSecret, String publicKey) {}
+    /** achEnabled is spike-only (tells the UI whether a bank tab is expected). */
+    public record CreateSetupIntentResponse(String id, String clientSecret, String publicKey, boolean achEnabled) {}
 
     private record CustomerResolution(String stripeCustomerId, String businessId) {}
 
@@ -52,12 +56,16 @@ public class CreateSetupIntentCommandHandler {
 
         SetupIntentCreateParams.Builder builder = SetupIntentCreateParams.builder()
                 .setUsage(SetupIntentCreateParams.Usage.OFF_SESSION)
-                // Payment methods come from the Stripe Dashboard ("dynamic payment methods").
-                // ACH (P1): once ACH Direct Debit is enabled on the AnswerForce account it shows up here, add
-                // payment_method_options.us_bank_account (verification_method, financial_connections.permissions).
+                // Payment methods come from the Stripe Dashboard ("dynamic payment methods"): once ACH Direct Debit is
+                // enabled on the AnswerForce account, us_bank_account is offered here too.
                 .setAutomaticPaymentMethods(SetupIntentCreateParams.AutomaticPaymentMethods.builder()
                         .setEnabled(true)
                         .build());
+        boolean achEnabled = achIntentOptions.isEnabled(resolution.businessId());
+        if (achEnabled) {
+            // ACH (P1): verification method + Financial Connections permissions
+            achIntentOptions.apply(builder);
+        }
         if (resolution.stripeCustomerId() != null) {
             builder.setCustomer(resolution.stripeCustomerId());
         }
@@ -71,7 +79,8 @@ public class CreateSetupIntentCommandHandler {
         return new CreateSetupIntentResponse(
                 setupIntent.getId(),
                 setupIntent.getClientSecret(),
-                requestOptionsProvider.getPublicKey(resolution.businessId()));
+                requestOptionsProvider.getPublicKey(resolution.businessId()),
+                achEnabled);
     }
 
     private CustomerResolution resolveCustomer(String businessId, String customerKey, boolean hasCustomerKey) {

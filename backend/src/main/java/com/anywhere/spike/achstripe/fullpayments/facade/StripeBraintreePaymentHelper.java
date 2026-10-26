@@ -127,6 +127,9 @@ public class StripeBraintreePaymentHelper {
                 response.put(STATUS, true);
                 response.put(TRANSACTION_JDO, mapTransactionJdo(result.transactionJDO()));
                 response.put("cardInfo", result.cardInfo());
+                // ACH (P6): bank details instead of the fake card fallback
+                response.put("bankInfo", result.bankInfo());
+                response.put("paymentMethodType", result.transactionJDO().getPaymentMethodType());
                 response.put(SOURCE, SOURCE_STRIPE);
                 return response;
             } catch (Exception e) {
@@ -207,6 +210,10 @@ public class StripeBraintreePaymentHelper {
         Map<String, Object> response = new HashMap<>();
         response.put(STATUS, true);
         response.put("cardInfo", result.cardInfo());
+        // ACH (P6)
+        response.put("bankInfo", result.bankInfo());
+        response.put("paymentMethodType", result.paymentMethodType());
+        response.put("paymentMethodId", result.paymentMethodId());
         response.put("postalCode", result.postalCode());
         response.put(TRANSACTION_JDO, Map.of("customerKey", result.customerKey()));
         response.put(SOURCE, SOURCE_STRIPE);
@@ -223,6 +230,7 @@ public class StripeBraintreePaymentHelper {
         map.put("customerKey", jdo.getCustomerKey());
         map.put("profileId", jdo.getProfileId());
         map.put("referenceTransaction", jdo.getReferenceTransaction());
+        map.put("paymentMethodType", jdo.getPaymentMethodType());
         return map;
     }
 
