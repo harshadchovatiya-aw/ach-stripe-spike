@@ -1,0 +1,53 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ach-stripe-spike
+  datasource:
+    # In-memory database: everything is lost when the container stops.
+    url: jdbc:h2:mem:spike;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true
+
+logging:
+  level:
+    com.anywhere.spike: DEBUG
+
+spike:
+  # The jBilling hosted API part of this app talks to the FullPayments part over HTTP,
+  # exactly like the real systems. Both live in this one app, so it calls itself.
+  fullpayments-base-url: ${FULLPAYMENTS_BASE_URL:http://localhost:8080}
+
+  stripe:
+    # Webhook signing secret (whsec_...). Either set it directly, or let the stripe-cli
+    # container write it to a shared file (see docker-compose.yml).
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    webhook-secret-file: ${STRIPE_WEBHOOK_SECRET_FILE:}
+    # FullPayments business id -> Stripe account keys (StripeRequestOptionsProvider / PlatformPublicKeyProvider).
+    # Only the AnswerForce US platform account is in scope for ACH, so that is the only one configured.
+    businesses:
+      "[stripe-answerforce-us-platform]":
+        secret-key: ${STRIPE_SECRET_KEY:}
+        publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+
+  # jBilling brand configuration (mirrors ApplicationResources*.properties in jBilling_hosted_api)
+  brands:
+    "[c26495e9-f41e-4b8d-a442-22ab742563b7]":
+      name: AnswerForce US
+      # {brandId}.stripe.businessid
+      stripe-business-id: stripe-answerforce-us-platform
+      # {brandId}.btbusinessid - what jBilling sends to the FullPayments Braintree facade
+      bt-business-id: 7aa0b29d-5396-4593-942f-2c33914fc4cb
+      currency: USD
+      currency-symbol: "$"

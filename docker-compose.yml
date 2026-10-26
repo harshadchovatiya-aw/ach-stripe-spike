@@ -1,0 +1,44 @@
+name: ach-stripe-spike
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"           # API + H2 console at http://localhost:8080/h2-console
+    environment:
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?Set STRIPE_SECRET_KEY in .env}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:?Set STRIPE_PUBLISHABLE_KEY in .env}
+      # Optional: set it in .env to use your own `stripe listen` instead of the stripe-cli container
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Written by the stripe-cli container below
+      STRIPE_WEBHOOK_SECRET_FILE: /shared/whsec
+    volumes:
+      - stripe-shared:/shared:ro
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"             # UI at http://localhost:3000
+    depends_on:
+      - backend
+
+  # Forwards Stripe test-mode webhooks to the backend platform webhook endpoint
+  # (needed e.g. for payment_method.attached, and later for the ACH settlement / failure events).
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    depends_on:
+      - backend
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        stripe listen --api-key "$$STRIPE_API_KEY" --print-secret > /shared/whsec &&
+        echo "Webhook signing secret written to /shared/whsec" &&
+        stripe listen --api-key "$$STRIPE_API_KEY"
+        --forward-to http://backend:8080/webhook/stripe/platform/v2026-01-28
+    volumes:
+      - stripe-shared:/shared
+
+volumes:
+  stripe-shared:

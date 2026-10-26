@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ACH Stripe Spike</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Stripe.js must always be loaded from js.stripe.com -->
+  <script src="https://js.stripe.com/v3/"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ACH Stripe spike</h1>
+    <p class="sub">Replica of today's <strong>card</strong> flow on the Stripe <strong>platform</strong> account (AnswerForce US):
+      UI → FullPayments platform intents → jBilling hosted API → jBilling → FullPayments "Braintree facade" → Stripe</p>
+  </div>
+  <div id="status-chips"></div>
+</header>
+
+<main>
+  <section class="col">
+    <!-- Account -->
+    <div class="card">
+      <div class="card-head">
+        <h2>jBilling account</h2>
+        <div class="row">
+          <select id="account-select"></select>
+          <button id="btn-new-account" class="secondary">New test account</button>
+        </div>
+      </div>
+      <dl id="account-details" class="kv"></dl>
+    </div>
+
+    <!-- Instrument -->
+    <div class="card">
+      <h2>Payment instrument on file <span class="hint">GET /getPaymentInstruments</span></h2>
+      <div id="instrument"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card">
+      <h2>Make a payment / update payment method</h2>
+      <div class="tabs" id="tabs">
+        <button data-flow="saved" class="tab active">Pay with saved card</button>
+        <button data-flow="new" class="tab">Pay with new card</button>
+        <button data-flow="setup" class="tab">Add / replace card</button>
+        <button data-flow="billing" class="tab">Billing run (recurring)</button>
+      </div>
+
+      <div id="flow-description" class="flow-desc"></div>
+
+      <div class="row" id="amount-row">
+        <label>Amount (USD) <input id="amount" type="number" step="0.01" min="0.50" value="49.00"></label>
+        <label id="save-row" class="check"><input id="save-card" type="checkbox" checked> Save card for future payments</label>
+      </div>
+
+      <div id="element-wrap" class="hidden">
+        <div id="payment-element"></div>
+        <p class="hint">Test cards: 4242 4242 4242 4242 (success) · 4000 0025 0000 3155 (3-D Secure) · 4000 0000 0000 9995 (declined) – any future date, any CVC.</p>
+      </div>
+
+      <div class="row">
+        <button id="btn-start" class="primary">Start</button>
+        <button id="btn-confirm" class="primary hidden">Confirm with Stripe</button>
+        <button id="btn-cancel" class="secondary hidden">Cancel</button>
+      </div>
+      <ol id="steps" class="steps"></ol>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="card">
+      <div class="card-head">
+        <h2>jBilling payments <span class="hint">payment recorded in "jBilling"</span></h2>
+        <button id="btn-refresh" class="secondary">Refresh</button>
+      </div>
+      <div id="payments"></div>
+    </div>
+
+    <div class="card">
+      <h2>FullPayments state <span class="hint">StripePlatformCustomer · TransactionJDO · caches</span></h2>
+      <div id="fullpayments"></div>
+    </div>
+
+    <div class="card">
+      <h2>Stripe webhooks received <span class="hint">/webhook/stripe/platform/v2026-01-28</span></h2>
+      <div id="webhooks"></div>
+    </div>
+
+    <div class="card">
+      <h2>DS notes &amp; tasks</h2>
+      <div id="ds"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>API call log</h2>
+        <button id="btn-clear-log" class="secondary">Clear</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
